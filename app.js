@@ -150,7 +150,7 @@
       h('span', { class: 'n' }, Number(date.slice(8))),
       cl.length ? h('span', { class: 'u' }, cl.map((c) => calTitle(c)).join('/')) : null,
       cl.length ? dotsFor(es, cl[0], date) : null,
-      h('div', { class: 'badges' }, mine.slice(0, 3).map((e) => h('span', { class: 'bd ' + (e.status || '') + (fm[e.id] ? ' bad' : '') }, T[e.type].short + (e.status === 'mine' ? '✓' : ''))), mine.length > 3 ? h('span', { class: 'bd' }, '+') : null));
+      h('div', { class: 'badges' }, mine.slice(0, 3).map((e) => h('span', { class: 'bd ' + (e.status || '') + (fm[e.id] ? ' bad' : '') }, T[e.type].short + (e.status === 'mine' ? '✓' : e.status === 'taken' ? '✗' : ''))), mine.length > 3 ? h('span', { class: 'bd' }, '+') : null));
   }
   function monthGrid(y, m, mini) {
     const g = h('div', { class: 'grid' });
@@ -220,11 +220,12 @@
   function who(e) { return e.who || 'Me'; }
   function entryRow(e, afterDelete) {
     const Tt = T[e.type], fl = flagMap()[e.id], mine = !e.who;
-    return h('div', { class: 'entry' + (fl && fl.shortfall > 0 ? ' short' : '') },
+    return h('div', { class: 'entry' + (fl && fl.shortfall > 0 ? ' short' : '') + (e.status === 'taken' ? ' struck' : '') },
       h('div', { class: 'row sp' },
         h('div', { class: 'grow' }, h('b', {}, E.isSpot(e.type) ? who(e) : ''), E.isSpot(e.type) ? ' · ' : '', h('b', {}, Tt.label), E.isSpot(e.type) ? ' · ' + E.HALVES[e.half] : '', Tt.deduct && mine && !Tt.adj ? ' · ' + fmtH(e.hours) + ' h' : '', Tt.adj ? ' · ' + fmtH(e.hours) + ' h' : '', e.title ? ' · ' + e.title : ''),
-        E.hasStatus(e) ? h('span', { class: 'pill ' + e.status, role: 'button', title: 'Tap to switch', onclick: () => mutate(() => { e.status = e.status === 'mine' ? 'tentative' : 'mine'; }) }, e.status === 'mine' ? 'MINE' : 'TENTATIVE') : null),
+        E.hasStatus(e) ? h('span', { class: 'pill ' + e.status, role: 'button', title: 'Tap to switch', onclick: () => (e.status === 'taken' ? setStatus(e, 'tentative') : setStatus(e, e.status === 'mine' ? 'tentative' : 'mine')) }, e.status === 'mine' ? 'MINE' : e.status === 'taken' ? 'TAKEN' : 'TENTATIVE') : null),
       e.note ? h('div', { class: 'hint' }, e.note) : null,
+      e.status === 'tentative' && E.PLAN_TYPES.includes(e.type) && !e.who ? h('div', { class: 'row' }, h('button', { class: 'btn sm', onclick: () => setStatus(e, 'taken') }, 'Taken by someone else')) : null,
       fl && fl.shortfall > 0 ? h('div', { class: 'err' }, '⚠ Short by ' + fmtH(fl.shortfall) + ' h: you will not have earned enough by ' + fmtDate(e.date, 'short') + '. ' + (fl.coveredOn ? 'Earned by ' + fmtDate(fl.coveredOn, 'mid') + ' if nothing else is scheduled first.' : 'Not covered by projected accrual.')) : null,
       fl && fl.early ? h('div', { class: 'err' }, '⚠ Before your first usable vacation date (' + fmtDate(S.settings.vac.firstUse, 'mid') + ').') : null,
       h('div', { class: 'row' }, h('button', { class: 'btn sm', onclick: () => showForm({ date: e.date, entry: e, cal: e.cal, back: 'day' }) }, 'Edit'),
@@ -366,7 +367,7 @@
     }
     const fresh = [], skipped = [];
     for (const d of dates) {
-      const cand = { id: view.entry ? view.entry.id : newId(), cal: spot ? f.cal : '', date: d, type: f.type, who: whoName, half: spot ? f.half : '', hours: Tt.deduct && !whoName ? hrs : (spot ? E.hoursFor(f.half) : 0), status: spot && !whoName ? f.status : '', title: spot ? '' : f.title.trim(), note: f.note.trim() };
+      const cand = { id: view.entry ? view.entry.id : newId(), cal: spot ? f.cal : '', date: d, type: f.type, who: whoName, half: spot ? f.half : '', hours: Tt.deduct && !whoName ? hrs : (spot ? E.hoursFor(f.half) : 0), status: spot && !whoName ? f.status : '', rank: view.entry && !whoName ? (view.entry.rank || 0) : 0, title: spot ? '' : f.title.trim(), note: f.note.trim() };
       if (spot) {
         const r = E.checkPlace(pool(view).concat(fresh), cand, spots());
         if (!r.ok) { skipped.push({ d, r }); continue; }
@@ -402,6 +403,39 @@
   /* ---------- Home ---------- */
   const CONF_LABELS = { calendars: 'Calendar start dates', payperiod: 'Pay-period dates and accrual timing', vacRate: 'Vacation tier / accrual rate', balances: 'Starting balances and balance date' };
   const kv = (k, v) => h('div', { class: 'kv' }, h('span', {}, k), h('b', {}, v));
+  // change one of my picks between tentative / mine / taken. Going back to tentative must still fit the 3-spot rule.
+  function setStatus(e, status) {
+    if (status !== 'taken') {
+      const r = E.checkPlace(S.entries, Object.assign({}, e, { status }), spots());
+      if (!r.ok) { toast('Cannot restore: ' + fmtDate(e.date, 'short') + ' is full for that time. Remove someone first.'); return; }
+    }
+    const before = snap();
+    mutate(() => { e.status = status; });
+    toast(status === 'taken' ? 'Marked taken. It no longer counts. Add who took it from the day.' : status === 'mine' ? 'Got it' : 'Back on your plan', () => restore(before));
+  }
+  function planCard(y) {
+    const P = E.planList(S.entries, y), n = P.active.length;
+    const fm = flagMap();
+    const what = (e) => fmtDate(e.date, 'mid') + ' · ' + T[e.type].label + ' · ' + E.HALVES[e.half] + (T[e.type].deduct ? ' · ' + fmtH(e.hours) + ' h' : '') + ' · ' + calTitle(e.cal);
+    const act = (e, i) => h('div', { class: 'plan' },
+      h('span', { class: 'rk' }, i + 1),
+      h('div', { class: 'grow', role: 'button', onclick: () => showDay(e.date) }, h('div', {}, h('b', {}, what(e))), fm[e.id] && fm[e.id].shortfall > 0 ? h('div', { class: 'err', style: 'margin:4px 0 0' }, 'Short by ' + fmtH(fm[e.id].shortfall) + ' h on this date') : null),
+      h('div', { class: 'pbtn' },
+        h('button', { class: 'btn sm', disabled: i === 0, 'aria-label': 'Move up', onclick: () => mutate(() => { E.movePlan(S.entries, e.id, -1, y); }) }, '↑'),
+        h('button', { class: 'btn sm', disabled: i === n - 1, 'aria-label': 'Move down', onclick: () => mutate(() => { E.movePlan(S.entries, e.id, 1, y); }) }, '↓'),
+        h('button', { class: 'btn sm pri', onclick: () => setStatus(e, 'mine') }, 'Got it'),
+        h('button', { class: 'btn sm dng', onclick: () => setStatus(e, 'taken') }, 'Taken')));
+    const dn = (e) => h('div', { class: 'plan done ' + e.status },
+      h('span', { class: 'rk' }, e.status === 'mine' ? '✓' : '✗'),
+      h('div', { class: 'grow', role: 'button', onclick: () => showDay(e.date) }, h('span', { class: 'strike' }, what(e)), h('small', {}, e.status === 'mine' ? '  GOT IT' : '  TAKEN')),
+      h('div', { class: 'pbtn' },
+        e.status === 'taken' ? h('button', { class: 'btn sm', onclick: () => showForm({ date: e.date, cal: e.cal, back: 'close' }) }, 'Add who took it') : null,
+        h('button', { class: 'btn sm', onclick: () => setStatus(e, 'tentative') }, 'Restore')));
+    return h('div', { class: 'card' }, h('h2', {}, 'My plan · ' + y),
+      h('div', { class: 'hint' }, 'Your picks in order of priority (1 = most wanted). Use the arrows to reorder. When a day is yours, tap Got it. When someone else gets it first, tap Taken: it is struck out and stops counting toward your hours and the three spots.'),
+      n ? P.active.map(act) : h('div', { class: 'hint' }, 'No tentative picks for ' + y + '. Add vacation, personal or EDO days from the Calendar.'),
+      P.done.length ? h('div', {}, h('div', { class: 'fl', style: 'margin-top:10px' }, 'Settled'), P.done.map(dn)) : null);
+  }
   function projectorCard() {
     const dIn = h('input', { type: 'date', value: ui.projDate, onchange: (ev) => { if (E.validDate(ev.target.value)) { ui.projDate = ev.target.value; render(); } } });
     return h('div', { class: 'card' }, h('h2', {}, 'Balance on any date'), h('label', { class: 'f' }, h('span', {}, 'Pick a date'), dIn), stmtBox('vac', ui.projDate), stmtBox('sick', ui.projDate));
@@ -413,7 +447,7 @@
   function viewHome() {
     const y = ui.year, V = getL('vac'), K = getL('sick'), vs = V.stats(y), ks = K.stats(y), my = S.settings.myCal;
     const unconf = Object.keys(S.settings.confirmed).filter((k) => !S.settings.confirmed[k]);
-    const nextV = S.entries.filter((e) => !e.who && (e.type === 'vacation' || e.type === 'personal') && e.date >= today).sort((a, b) => a.date.localeCompare(b.date))[0];
+    const nextV = S.entries.filter((e) => !e.who && (e.type === 'vacation' || e.type === 'personal') && E.isActive(e) && e.date >= today).sort((a, b) => a.date.localeCompare(b.date))[0];
     const tcl = E.dutyCals(today, S), nd = E.nextDutyDay(today, my, S), nd2 = nd ? E.nextDutyDay(E.addDays(nd, 1), my, S) : null;
     return h('div', {},
       loadWarn ? h('div', { class: 'err' }, loadWarn) : null,
@@ -467,7 +501,8 @@
     return h('div', {},
       h('div', { class: 'row sp' }, h('div', { class: 'seg' }, h('button', { class: bank === 'vac' ? 'on' : '', onclick: () => { ui.bank = 'vac'; render(); } }, 'Vacation'), h('button', { class: bank === 'sick' ? 'on' : '', onclick: () => { ui.bank = 'sick'; render(); } }, 'Sick')),
         h('div', { class: 'row' }, h('button', { class: 'btn', onclick: () => { ui.year--; render(); } }, '‹'), h('b', {}, y), h('button', { class: 'btn', onclick: () => { ui.year++; render(); } }, '›'))),
-      h('div', { class: 'card', style: 'margin-top:10px' }, h('h2', {}, nm + ' · ' + y),
+      h('div', { style: 'margin-top:10px' }, planCard(y)),
+      h('div', { class: 'card' }, h('h2', {}, nm + ' · ' + y),
         kv('Starting balance', fmtH(st.startBal) + ' h'), kv('Total accrued', fmtH(st.accrued) + ' h'), kv('Total scheduled', fmtH(st.scheduled) + ' h'), kv('Other deductions', fmtH(st.other) + ' h'),
         st.removed ? kv('Excess removed Mar 31', fmtH(st.removed) + ' h') : null,
         kv('Projected year-end available', fmtH(st.yearEnd) + ' h'), kv('Lowest balance', fmtH(st.lowest) + ' h · ' + fmtDate(st.lowestDate, 'short')),
@@ -630,7 +665,7 @@
   /* ---------- Print ---------- */
   function slotsFor(calId, date) {
     const n = spots(), F = Array(n).fill(null), Sx = Array(n).fill(null);
-    const es = dateEntries(date).filter((e) => e.cal === calId && E.isSpot(e.type)).sort((a, b) => (a.half === 'W' ? 0 : 1) - (b.half === 'W' ? 0 : 1));
+    const es = dateEntries(date).filter((e) => e.cal === calId && E.isSpot(e.type) && E.isActive(e)).sort((a, b) => (a.half === 'W' ? 0 : 1) - (b.half === 'W' ? 0 : 1));
     for (const e of es) {
       if (e.half === 'W') { const i = F.findIndex((v, k) => !v && !Sx[k]); if (i >= 0) { F[i] = e; Sx[i] = e; } }
       else if (e.half === 'F') { const i = F.findIndex((v) => !v); if (i >= 0) F[i] = e; }
@@ -680,7 +715,7 @@
       const by = E.edoByMonth(S.entries, y);
       out.push(h('div', { class: 'p-eboxes' }, by.map((x) => h('div', { class: 'p-ebox' + (filled && x.entries.length ? ' on' : '') }, h('b', {}, MONTHS[x.month - 1]), h('div', {}, filled && x.entries.length ? x.entries.map((e) => fmtDate(e.date, 'short') + (e.status === 'mine' ? '' : ' (tent.)')).join(', ') : ' ')))));
     } else if (p.kind === 'vac') {
-      const l = S.entries.filter((e) => !e.who && (e.type === 'vacation' || e.type === 'personal') && e.date.startsWith(String(y))).sort((a, b) => a.date.localeCompare(b.date)), V = getL('vac'), fm = flagMap();
+      const l = S.entries.filter((e) => !e.who && (e.type === 'vacation' || e.type === 'personal') && E.isActive(e) && e.date.startsWith(String(y))).sort((a, b) => a.date.localeCompare(b.date)), V = getL('vac'), fm = flagMap();
       out.push(h('div', { class: 'p-title' }, y + ' Vacation Selections'));
       out.push(h('table', { class: 'p-t' }, h('thead', {}, h('tr', {}, ['Date', 'Type', 'Time', 'Hours', 'Status', 'Balance after', 'Note'].map((c, i) => h('th', { class: i === 3 || i === 5 ? 'r' : '' }, c)))),
         h('tbody', {}, l.map((e) => { const r = V.events.find((x) => x.kind === 'deduct' && x.entry.id === e.id); return h('tr', {}, h('td', {}, fmtDate(e.date, 'mid')), h('td', {}, T[e.type].label), h('td', {}, E.HALVES[e.half]), h('td', { class: 'r' }, fmtH(e.hours)), h('td', {}, e.status.toUpperCase()), h('td', { class: 'r' }, r ? fmtH(r.after) + (fm[e.id] ? ' SHORT' : '') : ''), h('td', {}, e.note)); }))));

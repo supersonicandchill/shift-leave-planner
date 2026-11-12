@@ -38,6 +38,7 @@ const DAY = '2027-03-05'; // calendar 1 duty day
 const cellFor = (date) => $(d, '[aria-label="' + w.eval('(function(){return null})()') + '"]');
 function openDay(date) { w.__SLP.go('calendar'); const p = w.Engine.parse(date); A.ui.year = p.y; A.ui.month = p.m; A.ui.mode = 'month'; w.__SLP.render(); const lab = new w.Date(Date.UTC(p.y, p.m - 1, p.d)).toLocaleDateString('en-US', { timeZone: 'UTC', weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }); const c = $$(d, '.cell').find((e) => e.getAttribute('aria-label') === lab); assert.ok(c, 'cell for ' + date); c.click(); }
 
+function openDayOn(X, date) { X.w.__SLP.go('calendar'); const p = X.w.Engine.parse(date); X.ui.year = p.y; X.ui.month = p.m; X.ui.mode = 'month'; X.w.__SLP.render(); const lab = new X.w.Date(Date.UTC(p.y, p.m - 1, p.d)).toLocaleDateString('en-US', { timeZone: 'UTC', weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }); const c = $$(X.d, '.cell').find((e) => e.getAttribute('aria-label') === lab); assert.ok(c, 'cell ' + date); c.click(); }
 console.log('UI SMOKE');
 t('app loads with no console or script errors; 5 tabs; header', () => {
   assert.deepStrictEqual(A.errors, []);
@@ -257,6 +258,67 @@ t('storage blocked (private mode): app still works and warns', () => {
   B.w.__SLP.mutate(() => { B.S().names.push('X'); });
   assert.ok(B.d.querySelector('header .saved').textContent.includes('not saving')); assert.deepStrictEqual(B.errors, []);
 });
+
+console.log('PRIORITY PLAN UI');
+{
+  const P = boot();
+  const mk = (id, date, o) => Object.assign({ id, cal: 'c1', date, type: 'vacation', who: '', half: 'W', hours: 24, status: 'tentative', rank: 0, title: '', note: '' }, o || {});
+  P.w.__SLP.mutate(() => { P.S().entries.push(mk('nov', '2027-11-09'), mk('may', '2027-05-19')); });
+  P.ui.year = 2027; P.w.__SLP.go('leave');
+  const rows = () => $$(P.d, '.plan').filter((r) => !r.classList.contains('done'));
+  const dones = () => $$(P.d, '.plan.done');
+  const btn = (row, txt) => $$(row, 'button').find((b) => b.textContent.trim() === txt);
+  t('plan card lists November and May picks across the year, by date until ranked', () => {
+    assert.strictEqual(rows().length, 2);
+    assert.ok(rows()[0].textContent.includes('May 19') && rows()[1].textContent.includes('Nov 9'));
+    assert.ok(btn(rows()[0], '↑').disabled && btn(rows()[1], '↓').disabled);
+  });
+  t('down arrow reorders and the new order survives a reload', () => {
+    btn(rows()[0], '↓').click();
+    assert.ok(rows()[0].textContent.includes('Nov 9'), 'nov first now');
+    const R = boot({ 'shiftLeavePlanner.v2': P.w.localStorage.getItem('shiftLeavePlanner.v2') });
+    R.ui.year = 2027; R.w.__SLP.go('leave');
+    assert.ok($$(R.d, '.plan')[0].textContent.includes('Nov 9'));
+  });
+  t('Taken strikes the day out, drops it from hours, and Add who took it is offered', () => {
+    const before = P.w.eval('Engine.buildLedger("vac", __SLP.state).stats(2027).scheduled');
+    btn(rows()[0], 'Taken').click();
+    assert.strictEqual(rows().length, 1); assert.strictEqual(dones().length, 1);
+    assert.ok(dones()[0].querySelector('.strike') && dones()[0].textContent.includes('TAKEN'));
+    assert.strictEqual(P.w.eval('Engine.buildLedger("vac", __SLP.state).stats(2027).scheduled'), before - 24);
+    assert.ok(btn(dones()[0], 'Add who took it'));
+  });
+  t('after Taken, someone else can be added to that date; undo toast brings the pick back', () => {
+    const undo = $$(P.d, '.toast .undo').pop(); assert.ok(undo);
+    undo.click();
+    assert.strictEqual(rows().length, 2); assert.strictEqual(dones().length, 0);
+    btn(rows()[0], 'Taken').click();
+    const date = P.S().entries.find((e) => e.status === 'taken').date;
+    const r = P.w.Engine.checkPlace(P.S().entries, { id: 'z', cal: 'c1', date, type: 'vacation', who: 'Sam', half: 'W' }, 3);
+    assert.ok(r.ok);
+  });
+  t('Got it settles a pick as mine (struck with a check) and keeps it counting', () => {
+    const before = P.w.eval('Engine.buildLedger("vac", __SLP.state).stats(2027).scheduled');
+    btn(rows()[0], 'Got it').click();
+    const mine = dones().find((r) => r.classList.contains('mine')); assert.ok(mine && mine.textContent.includes('GOT IT'));
+    assert.strictEqual(P.w.eval('Engine.buildLedger("vac", __SLP.state).stats(2027).scheduled'), before);
+  });
+  t('Restore is refused when others have since filled the day', () => {
+    const tk = P.S().entries.find((e) => e.status === 'taken');
+    P.w.__SLP.mutate(() => { ['A', 'B', 'C'].forEach((n, i) => P.S().entries.push(mk('f' + i, tk.date, { who: n, status: '', hours: 24 }))); });
+    btn(dones().find((r) => r.classList.contains('taken')), 'Restore').click();
+    assert.strictEqual(P.S().entries.find((e) => e.id === tk.id).status, 'taken');
+    assert.ok($$(P.d, '.toast').pop().textContent.includes('Cannot restore'));
+  });
+  t('struck pick shows crossed out on the calendar and day sheet', () => {
+    const tk = P.S().entries.find((e) => e.status === 'taken');
+    openDayOn(P, tk.date);
+    assert.ok($(P.d, '.sheet .entry.struck'));
+    P.w.__SLP.closeSheet && P.w.__SLP.closeSheet();
+  });
+  t('no console or script errors in plan flow', () => assert.deepStrictEqual(P.errors, []));
+}
+
 t('help tab has the how-to sections', () => {
   w.__SLP.go('help'); const s = $$(d, 'details.acc summary').map((x) => x.textContent);
   assert.ok(s.some((x) => x.includes('three-spots')) && s.some((x) => x.includes('Start here')) && s.some((x) => x.includes('Calendar and filters')));

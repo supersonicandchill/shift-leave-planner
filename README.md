@@ -9,11 +9,12 @@ Open the page, then use the **?** buttons (Calendar filters) and the **Help** ta
 1. Settings: title each calendar and set its start date (defaults 1/2/3 Unit = Jan 1/2/3 2027). Each works every 3rd day; Feb 29 is shown but never counted, and the cycle resumes Mar 1.
 2. Pick your calendar ("Only my calendar"), tap a date, choose what / who / First 12, Second 12 or Whole 24.
 3. Max 3 people off per half-day. Full halves are disabled before you can pick them.
-4. Leave tab: balances and projections (shortfalls flagged). Export tab: ICS, print (blank or filled), JSON backup/restore.
+4. **My plan** (top of the Leave tab): your tentative vacation, personal and EDO picks in priority order (↑ ↓ to reorder, any month of the year). **Got it** marks a day as yours; **Taken** strikes it out when someone else gets it first. Taken days stop counting toward your hours and free the spot so you can enter who took it. **Restore** brings one back if the day still has room.
+5. Leave tab: balances and projections (shortfalls flagged). Export tab: ICS, print (blank or filled), JSON backup/restore.
 
 ## Run locally
     npm install
-    npm test          # 60 engine + 34 UI tests
+    npm test          # 66 engine + 42 UI tests
 Open index.html in a browser (no build step).
 
 ## Things to confirm (not in the CBA text)

@@ -16,7 +16,7 @@ const ent = (date, type, o) => {
   const T = E.TYPES[type];
   return { id: 'e' + (++idn), cal: o.cal !== undefined ? o.cal : (spot ? 'c1' : ''), date, type, who, half,
     hours: o.hours !== undefined ? o.hours : (T.deduct ? E.hoursFor(half || 'W') : 0),
-    status: spot && !who ? (o.status || 'tentative') : '', title: '', note: '' };
+    status: spot && !who ? (o.status || 'tentative') : '', rank: 0, title: '', note: '' };
 };
 const base = (mod) => { const s = E.defaultState(); if (mod) mod(s); return s; };
 const setStarts = (s, a, b, c) => { s.settings.calendars[0].start = a; s.settings.calendars[1].start = b; s.settings.calendars[2].start = c; };
@@ -375,6 +375,58 @@ t('rejects duplicate ids and sanitizes oversized notes and names', () => {
   assert.ok(!bad((s) => { const e = { id: 'a', cal: 'c1', date: '2027-03-04', type: 'note', who: '', half: '', hours: 0, status: '' }; s.entries = [e, Object.assign({}, e)]; }).ok);
   const r = bad((s) => { s.entries = [{ id: 'a', cal: '', date: '2027-03-04', type: 'note', who: '', half: '', hours: 0, status: '', title: 'x'.repeat(500), note: 'y'.repeat(5000) }]; });
   assert.ok(r.ok); assert.strictEqual(r.state.entries[0].title.length, 200); assert.strictEqual(r.state.entries[0].note.length, 2000);
+});
+
+/* ---------- priority plan + "taken" ---------- */
+console.log('PRIORITY PLAN');
+t('plan list: tentative picks in rank order (unranked by date after), settled ones separate', () => {
+  const a = ent('2027-11-05', 'vacation', { half: 'W' }), b = ent('2027-05-12', 'vacation', { half: 'W' }), c = ent('2027-08-01', 'personal', { half: 'F' }), m = ent('2027-02-03', 'vacation', { status: 'mine' }), x = ent('2027-06-06', 'sick');
+  const P = E.planList([a, b, c, m, x], 2027);
+  assert.deepStrictEqual(P.active.map((e) => e.id), [b.id, c.id, a.id]); // none ranked: by date
+  assert.deepStrictEqual(P.done.map((e) => e.id), [m.id]);              // sick is never in the plan
+  a.rank = 1; c.rank = 2;
+  assert.deepStrictEqual(E.planList([a, b, c], 2027).active.map((e) => e.id), [a.id, c.id, b.id]); // ranked first
+});
+t('November pick ranked above a May pick: year order does not matter', () => {
+  const nov = ent('2027-11-10', 'vacation'), may = ent('2027-05-20', 'vacation'), es = [may, nov];
+  E.movePlan(es, nov.id, -1, 2027);
+  assert.deepStrictEqual(E.planList(es, 2027).active.map((e) => e.date), ['2027-11-10', '2027-05-20']);
+  assert.deepStrictEqual([nov.rank, may.rank], [1, 2]);
+});
+t('movePlan renumbers 1..n, swaps neighbours, refuses to move past either end', () => {
+  const es = [ent('2027-01-10', 'vacation'), ent('2027-02-10', 'vacation'), ent('2027-03-10', 'vacation')];
+  assert.ok(!E.movePlan(es, es[0].id, -1, 2027)); assert.ok(!E.movePlan(es, es[2].id, 1, 2027));
+  assert.ok(E.movePlan(es, es[2].id, -1, 2027));
+  assert.deepStrictEqual(E.planList(es, 2027).active.map((e) => e.date), ['2027-01-10', '2027-03-10', '2027-02-10']);
+  assert.deepStrictEqual(es.map((e) => e.rank).sort(), [1, 2, 3]);
+});
+t('a taken pick frees its spot, stops deducting hours, and leaves the EDO box and ICS', () => {
+  const st = base(); const v = ent('2027-03-05', 'vacation', { status: 'tentative' }), edo = ent('2027-04-04', 'edo', { status: 'tentative' });
+  const others = ['A', 'B'].map((n) => ent('2027-03-05', 'vacation', { who: n }));
+  st.entries = [v, edo].concat(others);
+  const hrs = () => E.buildLedger('vac', st).stats(2027).scheduled;
+  const before = hrs();
+  assert.strictEqual(E.spotUse(st.entries, 'c1', '2027-03-05').F.length, 3);
+  assert.ok(!E.checkPlace(st.entries, ent('2027-03-05', 'vacation', { who: 'C' }), 3).ok);
+  v.status = 'taken'; edo.status = 'taken';
+  assert.strictEqual(E.spotUse(st.entries, 'c1', '2027-03-05').F.length, 2);
+  assert.ok(E.checkPlace(st.entries, ent('2027-03-05', 'vacation', { who: 'C' }), 3).ok); // someone else can now take it
+  assert.strictEqual(hrs(), before - 24);
+  assert.strictEqual(E.edoByMonth(st.entries, 2027)[3].entries.length, 0);
+  assert.strictEqual(E.entryEvents([v, edo], st).length, 0);
+});
+t('restoring a taken pick onto a day that filled up is refused by the spot rule', () => {
+  const v = ent('2027-03-05', 'vacation', { status: 'taken' }), es = [v].concat(['A', 'B', 'C'].map((n) => ent('2027-03-05', 'vacation', { who: n })));
+  assert.ok(!E.checkPlace(es, Object.assign({}, v, { status: 'tentative' }), 3).ok);
+});
+t('backup keeps rank and taken status; taken entries do not trip the spot check on restore', () => {
+  const st = base(); const v = ent('2027-03-05', 'vacation', { status: 'taken' }); v.rank = 4;
+  st.entries = [v].concat(['A', 'B', 'C'].map((n) => ent('2027-03-05', 'vacation', { who: n })));
+  const r = E.validateState(JSON.parse(JSON.stringify(st)));
+  assert.ok(r.ok, r.errors.join('; ')); const back = r.state.entries.find((e) => e.id === v.id);
+  assert.strictEqual(back.status, 'taken'); assert.strictEqual(back.rank, 4);
+  const bad2 = JSON.parse(JSON.stringify(st)); bad2.entries[0].status = 'bogus';
+  assert.ok(!E.validateState(bad2).ok);
 });
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');

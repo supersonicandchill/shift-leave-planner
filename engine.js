@@ -61,7 +61,7 @@
     adjsick: { label: 'Other deduction (sick hrs)', bank: 'sick', deduct: true, adj: true, short: '-S' }
   };
   const SPOT_TYPES = Object.keys(TYPES).filter((k) => TYPES[k].spot);
-  const STATUSES = ['tentative', 'mine'];
+  const STATUSES = ['tentative', 'mine', 'taken']; // 'taken' = someone else got the day; kept for the plan list, counts nowhere
   const HALVES = { F: 'First 12', S: 'Second 12', W: 'Whole 24' };
   const isSpot = (type) => !!(TYPES[type] && TYPES[type].spot);
   const hoursFor = (half) => (half === 'W' ? 24 : 12);
@@ -70,6 +70,8 @@
   const norm = (s) => String(s == null ? '' : s).trim().toLowerCase();
   // only my own (no name) spot entries carry a status and touch my balances
   const hasStatus = (e) => isSpot(e.type) && !e.who;
+  const isActive = (e) => e.status !== 'taken';
+  const PLAN_TYPES = ['vacation', 'personal', 'edo'];
 
   /* ---------- Default state ---------- */
   function defaultState() {
@@ -182,7 +184,7 @@
   function spotUse(entries, calId, date, ignoreId) {
     const r = { F: [], S: [] };
     for (const e of entries) {
-      if (e.cal !== calId || e.date !== date || !isSpot(e.type) || e.id === ignoreId) continue;
+      if (e.cal !== calId || e.date !== date || !isSpot(e.type) || e.id === ignoreId || !isActive(e)) continue;
       for (const h of halvesOf(e.half)) r[h].push(e);
     }
     return r;
@@ -194,9 +196,9 @@
   // can this entry be placed? {ok, full:['F'|'S'], dup: entry|null, use}
   function checkPlace(entries, cand, spots) {
     const res = { ok: true, full: [], dup: null, use: { F: [], S: [] } };
-    if (!isSpot(cand.type)) return res;
+    if (!isSpot(cand.type) || !isActive(cand)) return res;
     for (const e of entries) {
-      if (e.id === cand.id || e.date !== cand.date || !isSpot(e.type)) continue;
+      if (e.id === cand.id || e.date !== cand.date || !isSpot(e.type) || !isActive(e)) continue;
       if (norm(e.who) === norm(cand.who) && overlap(e.half, cand.half)) { res.dup = e; res.ok = false; break; }
     }
     res.use = spotUse(entries, cand.cal, cand.date, cand.id);
@@ -206,19 +208,37 @@
   }
   const isFull = (entries, calId, date, spots) => { const u = spotUse(entries, calId, date); return u.F.length >= spots || u.S.length >= spots; };
   function personalUsed(entries, year) {
-    return entries.filter((e) => e.type === 'personal' && !e.who && parse(e.date).y === year).reduce((a, e) => a + e.hours, 0);
+    return entries.filter((e) => e.type === 'personal' && !e.who && isActive(e) && parse(e.date).y === year).reduce((a, e) => a + e.hours, 0);
   }
   // my EDOs per calendar month, for the breakout boxes (display only, nothing is limited)
   function edoByMonth(entries, year) {
     const out = [];
     for (let m = 1; m <= 12; m++) out.push({ month: m, entries: [] });
     for (const e of entries) {
-      if (e.type !== 'edo' || e.who) continue;
+      if (e.type !== 'edo' || e.who || !isActive(e)) continue;
       const p = parse(e.date);
       if (p.y === year) out[p.m - 1].entries.push(e);
     }
     out.forEach((x) => x.entries.sort((a, b) => a.date.localeCompare(b.date)));
     return out;
+  }
+
+  /* ---------- Priority plan (my own vacation / personal / EDO picks) ---------- */
+  // active = still wanted (tentative), in my priority order; done = got it (mine) or lost it (taken)
+  function planList(entries, year) {
+    const mine = entries.filter((e) => !e.who && PLAN_TYPES.includes(e.type) && (!year || parse(e.date).y === year));
+    const byDate = (a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id);
+    const active = mine.filter((e) => e.status === 'tentative').sort((a, b) => ((a.rank || 1e9) - (b.rank || 1e9)) || byDate(a, b));
+    const done = mine.filter((e) => e.status !== 'tentative').sort(byDate);
+    return { active, done };
+  }
+  // move one pick up (-1) or down (+1); renumbers the whole list 1..n
+  function movePlan(entries, id, dir, year) {
+    const a = planList(entries, year).active, i = a.findIndex((e) => e.id === id), j = i + dir;
+    if (i < 0 || j < 0 || j >= a.length) return false;
+    [a[i], a[j]] = [a[j], a[i]];
+    a.forEach((e, k) => { e.rank = k + 1; });
+    return true;
   }
 
   /* ---------- Accrual / ledger ---------- */
@@ -277,7 +297,7 @@
     for (const d of accrualDates(s.accrual, baseline, endDate)) ev.push({ date: d, prio: 1, kind: 'accrual', hours: rateAt(b.rates, d) });
     for (const e of st.entries) {
       const T = TYPES[e.type];
-      if (e.who || !T || !T.deduct || T.bank !== bank) continue;
+      if (e.who || !T || !T.deduct || T.bank !== bank || !isActive(e)) continue;
       if (dayNum(e.date) < bn || dayNum(e.date) > dayNum(endDate)) continue;
       ev.push({ date: e.date, prio: 2, kind: 'deduct', hours: e.hours, entry: e });
     }
@@ -386,7 +406,7 @@
     return dutyDates(st, calId, from, to).map((d) => ({ uid: 'duty-' + calId + '-' + d, date: d, summary: cal.title + ' on duty', description: calInfo(d, cal, st).forced ? 'Manual override.' : 'Calculated: every ' + st.settings.cycle + ' days from ' + cal.start + '.' }));
   }
   function entryEvents(entries, st) {
-    return entries.map((e) => {
+    return entries.filter(isActive).map((e) => {
       const T = TYPES[e.type];
       const cal = st && e.cal ? calById(st, e.cal) : null;
       const who = e.who ? e.who : (isSpot(e.type) ? 'Me' : '');
@@ -475,11 +495,12 @@
         let status = '';
         if (T.spot && !who) { if (!STATUSES.includes(e.status)) { errors.push(tag + ': bad status.'); return; } status = e.status; }
         seen.add(e.id);
-        st.entries.push({ id: e.id, cal, date: e.date, type: e.type, who, half, hours, status, title: typeof e.title === 'string' ? e.title.slice(0, 200) : '', note: typeof e.note === 'string' ? e.note.slice(0, 2000) : '' });
+        st.entries.push({ id: e.id, cal, date: e.date, type: e.type, who, half, hours, status, rank: Number.isInteger(e.rank) && e.rank > 0 ? e.rank : 0, title: typeof e.title === 'string' ? e.title.slice(0, 200) : '', note: typeof e.note === 'string' ? e.note.slice(0, 2000) : '' });
       });
       // the 3-spot rule must hold for everything in the file
       const placed = [];
       for (const e of st.entries) {
+        if (!isActive(e)) continue;
         const r = checkPlace(placed, e, st.settings.spots);
         if (!r.ok) errors.push('Entry on ' + e.date + (e.who ? ' (' + e.who + ')' : '') + ' breaks the spot limit or double-books a person.');
         placed.push(e);
@@ -513,7 +534,7 @@
     TYPES, SPOT_TYPES, STATUSES, HALVES, VAC_TIERS, SICK_RATES, defaultState,
     parse, validDate, dayNum, fromDayNum, addDays, isLeap, daysInMonth, isFeb29, dow, todayISO, iso, pad, seq,
     calWorks, baseWorks, calById, dutyCals, calInfo, dutyDates, nextDutyDay, expandRange, passesFilter,
-    isSpot, hoursFor, halvesOf, overlap, hasStatus, canonName, addName, renameName,
+    isSpot, hoursFor, halvesOf, overlap, hasStatus, isActive, planList, movePlan, PLAN_TYPES, canonName, addName, renameName,
     spotUse, freeSpots, checkPlace, isFull, personalUsed, edoByMonth,
     rateAt, accrualDates, buildLedger, buildICS, dutyEvents, entryEvents, validateState
   };

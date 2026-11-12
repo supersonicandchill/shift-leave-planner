@@ -213,3 +213,19 @@ code.k { background: #0c1322; padding: 1px 6px; border-radius: 5px; }
 .tip { padding: 6px 8px; font-size: 13px; margin: 6px 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .showing { font-size: 13px; padding: 6px 10px; margin: 6px 0 0; }
 .card.filt { padding: 10px; margin-bottom: 8px; }
+
+/* priority plan */
+.plan { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); flex-wrap: wrap; }
+.plan:first-of-type { border-top: 0; }
+.plan .rk { min-width: 30px; height: 30px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-weight: 800; background: var(--panel2); border: 1.5px solid var(--amber); color: var(--amber); }
+.plan .grow { min-width: 160px; cursor: pointer; }
+.plan .pbtn { display: flex; gap: 6px; flex-wrap: wrap; }
+.plan.done .rk { border-color: var(--line); color: var(--muted, #b4bfd6); }
+.plan.mine .rk { border-color: #3fb97a; color: #3fb97a; }
+.plan.taken .rk { border-color: var(--bad); color: var(--bad); }
+.strike, .entry.struck b { text-decoration: line-through; opacity: .7; }
+.entry.struck { opacity: .8; }
+.bd.taken { text-decoration: line-through; opacity: .6; border-style: dotted; }
+.pill.taken { border-color: var(--bad); color: var(--bad); text-decoration: line-through; }
+.pill.mine { }
+@media print { .plan .pbtn { display: none; } }
