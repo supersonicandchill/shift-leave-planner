@@ -1,0 +1,8 @@
+{
+  "name": "shift-leave-planner",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Personal shift calendar and leave planner. Static site, no backend.",
+  "scripts": { "test": "node tests/engine.test.js && node tests/ui.test.js" },
+  "devDependencies": { "jsdom": "24.1.0" }
+}
