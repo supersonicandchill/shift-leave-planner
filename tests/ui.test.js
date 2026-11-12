@@ -319,6 +319,22 @@ console.log('PRIORITY PLAN UI');
   t('no console or script errors in plan flow', () => assert.deepStrictEqual(P.errors, []));
 }
 
+
+t('year view: 12 full-size months with dots showing taken spots, and month chips jump', () => {
+  const Y = boot();
+  const mk = (id, date, who, half) => ({ id, cal: 'c1', date, type: 'vacation', who, half, hours: who ? 0 : 24, status: who ? '' : 'tentative', rank: 0, title: '', note: '' });
+  Y.w.__SLP.mutate(() => { Y.S().entries.push(mk('a', '2027-11-09', 'Sam', 'W'), mk('b', '2027-11-09', 'Lee', 'F'), mk('c', '2027-05-19', '', 'W')); });
+  Y.ui.year = 2027; Y.ui.mode = 'year'; Y.w.__SLP.go('calendar');
+  assert.strictEqual($$(Y.d, '.ymonth').length, 12); assert.strictEqual($$(Y.d, '.jump .chip').length, 12);
+  const nov = $(Y.d, '#ym-11');
+  const cell = $$(nov, '.cell').find((c) => c.getAttribute('aria-label').includes('November 9'));
+  assert.strictEqual($$(cell, '.dr')[0].querySelectorAll('i.f').length, 2); assert.strictEqual($$(cell, '.dr')[1].querySelectorAll('i.f').length, 1);
+  const may = $$($(Y.d, '#ym-5'), '.cell').find((c) => c.getAttribute('aria-label').includes('May 19'));
+  assert.ok(may.querySelector('.bd'), 'my badge shows in year view');
+  cell.click(); assert.ok($(Y.d, '.sheet'), 'tapping a day in year view opens it');
+  assert.deepStrictEqual(Y.errors, []);
+});
+
 t('help tab has the how-to sections', () => {
   w.__SLP.go('help'); const s = $$(d, 'details.acc summary').map((x) => x.textContent);
   assert.ok(s.some((x) => x.includes('three-spots')) && s.some((x) => x.includes('Start here')) && s.some((x) => x.includes('Calendar and filters')));

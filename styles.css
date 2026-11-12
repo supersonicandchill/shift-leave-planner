@@ -229,3 +229,14 @@ code.k { background: #0c1322; padding: 1px 6px; border-radius: 5px; }
 .pill.taken { border-color: var(--bad); color: var(--bad); text-decoration: line-through; }
 .pill.mine { }
 @media print { .plan .pbtn { display: none; } }
+
+/* year view: full-size months (same cells as month view), one column on a phone */
+.year { display: grid; grid-template-columns: 1fr; gap: 14px; }
+@media (min-width: 900px) { .year { grid-template-columns: repeat(2, 1fr); } }
+.ymonth { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 8px; scroll-margin-top: 8px; }
+.ymonth h4 { margin: 0 0 6px; font-size: 16px; cursor: pointer; display: flex; justify-content: space-between; align-items: baseline; }
+.ymonth h4 small { font-weight: 400; opacity: .7; font-size: 12px; }
+.jump { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 6px; margin-bottom: 8px; -webkit-overflow-scrolling: touch; }
+.jump .chip { flex: 0 0 auto; min-width: 46px; text-align: center; }
+.cell .dots ~ .badges { bottom: 24px; }
+.cell { min-height: 62px; }

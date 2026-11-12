@@ -209,7 +209,9 @@
         h('div', { class: 'seg' }, h('button', { class: mv ? 'on' : '', onclick: () => { ui.mode = 'month'; render(); } }, 'Month'), h('button', { class: !mv ? 'on' : '', onclick: () => { ui.mode = 'year'; render(); } }, 'Year')),
         h('div', { class: 'row' }, h('button', { class: 'btn sm', onclick: () => { ui.year = tp.y; ui.month = tp.m; render(); } }, 'Today'), h('button', { class: 'btn sm' + (ui.range ? ' pri' : ''), onclick: () => { ui.range = !ui.range; ui.rangeStart = null; render(); if (ui.range) toast('Tap the FIRST date'); } }, ui.range ? 'Cancel range' : 'Select range'))),
       ui.range ? h('div', { class: 'warn' }, ui.rangeStart ? 'Start: ' + fmtDate(ui.rangeStart, 'mid') + '. Tap the last date.' : 'Range mode: tap the first date, then the last date.') : null,
-      mv ? monthGrid(y, m, false) : h('div', { class: 'year' }, MONTHS.map((nm, i) => h('div', { class: 'mini' }, h('h4', { onclick: () => { ui.mode = 'month'; ui.month = i + 1; render(); } }, nm), monthGrid(y, i + 1, true)))),
+      mv ? monthGrid(y, m, false) : h('div', {},
+        h('div', { class: 'jump' }, MONTHS.map((nm, i) => h('button', { class: 'chip', onclick: () => { const el = document.getElementById('ym-' + (i + 1)); if (el) el.scrollIntoView({ block: 'start' }); } }, nm.slice(0, 3)))),
+        h('div', { class: 'year' }, MONTHS.map((nm, i) => h('section', { class: 'ymonth', id: 'ym-' + (i + 1) }, h('h4', { onclick: () => { ui.mode = 'month'; ui.month = i + 1; render(); } }, nm + ' ' + y, h('small', {}, '  open month ›')), monthGrid(y, i + 1, false))))),
       h('p', { class: 'hint' }, 'Badges (yours only): V vacation, S sick, P personal, E EDO, O other, N note. Dashed = tentative, solid white ✓ = mine. Red outline = not enough hours earned yet.'));
   }
 
